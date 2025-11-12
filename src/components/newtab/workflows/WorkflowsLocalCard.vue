@@ -1,0 +1,119 @@
+<template>
+  <shared-card
+    :data="workflow"
+    :data-workflow="workflow.id"
+    draggable="true"
+    class="local-workflow select-none ring-accent"
+    @click="$router.push(`/workflows/${$event.id}`)"
+  >
+    <template #header>
+      <div class="mb-4 flex items-center">
+        <template v-if="workflow && !workflow.isDisabled">
+          <ui-img
+            v-if="workflow.icon.startsWith('http')"
+            :src="workflow.icon"
+            class="overflow-hidden rounded-lg"
+            style="height: 40px; width: 40px"
+            alt="Can not display"
+          />
+          <span v-else class="bg-box-transparent inline-block rounded-lg p-2">
+            <v-remixicon :name="workflow.icon" />
+          </span>
+        </template>
+        <p v-else class="py-2">{{ t('common.disabled') }}</p>
+        <div class="grow"></div>
+        <button
+          v-if="!workflow.isDisabled"
+          class="invisible group-hover:visible"
+          @click.stop="$emit('execute')"
+        >
+          <v-remixicon name="riPlayLine" />
+        </button>
+        <ui-popover class="ml-2 h-6" trigger="manual" v-model="showMenu">
+          <template #trigger="{ isShow }">
+            <button @click.stop="showMenu = !showMenu">
+              <v-remixicon name="riMoreLine" />
+            </button>
+          </template>
+          <ui-list class="space-y-1" style="min-width: 165px">
+            <ui-list-item
+              class="cursor-pointer"
+              @click.stop="$emit('toggleDisable')"
+            >
+              <v-remixicon name="riToggleLine" class="mr-2 -ml-1" />
+              <span class="capitalize">
+                {{ t(`common.${workflow.isDisabled ? 'enable' : 'disable'}`) }}
+              </span>
+            </ui-list-item>
+            <ui-list-item class="cursor-pointer" @click.stop="$emit('togglePin')">
+              <v-remixicon name="riPushpin2Line" class="mr-2 -ml-1" />
+              <span>{{
+                t(`workflow.pinWorkflow.${isPinned ? 'unpin' : 'pin'}`)
+              }}</span>
+            </ui-list-item>
+            <ui-list-item
+              v-for="item in menu"
+              :key="item.id"
+              v-close-popover
+              class="cursor-pointer"
+              @click.stop="item.action(workflow)"
+            >
+              <v-remixicon :name="item.icon" class="mr-2 -ml-1" />
+              <span class="capitalize">{{ item.name }}</span>
+            </ui-list-item>
+          </ui-list>
+        </ui-popover>
+      </div>
+    </template>
+    <template #footer-content>
+      <v-remixicon
+        v-if="isShared"
+        v-tooltip:bottom.group="
+          t('workflow.share.sharedAs', {
+            name: isShared?.name.slice(0, 64),
+          })
+        "
+        name="riShareLine"
+        size="20"
+        class="ml-2"
+      />
+      <v-remixicon
+        v-if="isHosted"
+        v-tooltip:bottom.group="t('workflow.host.title')"
+        name="riBaseStationLine"
+        size="20"
+        class="ml-2"
+      />
+    </template>
+  </shared-card>
+</template>
+<script setup>
+import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
+import SharedCard from '@/components/newtab/shared/SharedCard.vue';
+
+const showMenu = ref(false);
+
+defineProps({
+  workflow: {
+    type: Object,
+    default: () => ({}),
+  },
+  menu: {
+    type: Array,
+    default: () => [],
+  },
+  isShared: {
+    type: Object,
+    default: null,
+  },
+  isHosted: {
+    type: Object,
+    default: null,
+  },
+  isPinned: Boolean,
+});
+defineEmits(['toggleDisable', 'togglePin', 'execute']);
+
+const { t } = useI18n();
+</script>
