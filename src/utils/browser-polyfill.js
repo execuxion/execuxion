@@ -12,6 +12,8 @@
  * - Performance optimization with caching
  */
 
+import { logger } from './logger';
+
 // Environment detection
 const isElectron = typeof window !== 'undefined' && window.electron;
 
@@ -25,6 +27,90 @@ class StorageArea {
     this.changeListeners = new Set();
     this._cache = null;
     this._cachePromise = null;
+    this._heartbeatInterval = null;
+    this._lastMainProcessTimestamp = Date.now();
+
+    // Setup cache coherency mechanisms for Electron
+    if (isElectron) {
+      this._setupCacheCoherency();
+    }
+  }
+
+  /**
+   * Setup cache coherency mechanisms to detect main process restarts
+   * Uses two approaches:
+   * 1. Main process ready event (for explicit restarts)
+   * 2. Heartbeat checks (for detecting unresponsive main process)
+   * @private
+   */
+  _setupCacheCoherency() {
+    // Approach 1: Listen for main process ready events
+    if (window.electron?.storage?.onMainProcessReady) {
+      logger.debug('[StorageArea]', 'Setting up main process ready listener for cache coherency');
+
+      window.electron.storage.onMainProcessReady((data) => {
+        logger.debug('[StorageArea]', 'Main process ready event received', data);
+
+        // If timestamp is newer than last known, main process restarted
+        if (data.timestamp > this._lastMainProcessTimestamp) {
+          logger.warn('[StorageArea]', 'Main process restarted - invalidating cache for data consistency');
+          this._invalidateCache();
+          this._lastMainProcessTimestamp = data.timestamp;
+        }
+      });
+    }
+
+    // Approach 2: Heartbeat to detect main process crashes
+    // Check every 5 seconds if main process is still responsive
+    this._heartbeatInterval = setInterval(() => {
+      this._checkMainProcessHealth();
+    }, 5000);
+
+    logger.debug('[StorageArea]', 'Cache coherency mechanisms initialized');
+  }
+
+  /**
+   * Check if main process is still responding
+   * If not responsive, invalidate cache to prevent stale data
+   * @private
+   */
+  async _checkMainProcessHealth() {
+    if (!isElectron || !window.electron?.storage) {
+      return;
+    }
+
+    try {
+      // Simple ping by reading a lightweight key
+      // If main process is unresponsive, this will timeout or throw
+      const startTime = Date.now();
+      await window.electron.storage.get('__healthcheck__');
+      const duration = Date.now() - startTime;
+
+      // If response took too long (>2 seconds), main process may have restarted
+      if (duration > 2000) {
+        logger.warn('[StorageArea]', 'Main process response slow - invalidating cache');
+        this._invalidateCache();
+      }
+    } catch (error) {
+      logger.error('[StorageArea]', 'Main process health check failed - invalidating cache', error);
+      this._invalidateCache();
+    }
+  }
+
+  /**
+   * Clean up resources (intervals, listeners)
+   * Called when StorageArea is no longer needed
+   * @public
+   */
+  destroy() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+      logger.debug('[StorageArea]', 'Heartbeat interval cleared');
+    }
+
+    // Clear listeners
+    this.changeListeners.clear();
   }
 
   /**
@@ -48,7 +134,7 @@ class StorageArea {
           return this._cache;
         })
         .catch(error => {
-          console.error('[StorageArea] Failed to load cache:', error);
+          logger.error('[StorageArea] Failed to load cache', error);
           this._cache = {};
           this._cachePromise = null;
           return this._cache;
@@ -61,7 +147,7 @@ class StorageArea {
       const stored = localStorage.getItem(`automa-${this.areaName}`);
       this._cache = stored ? JSON.parse(stored) : {};
     } catch (error) {
-      console.error('[StorageArea] Failed to parse localStorage:', error);
+      logger.error('[StorageArea] Failed to parse localStorage', error);
       this._cache = {};
     }
 
@@ -79,11 +165,22 @@ class StorageArea {
   }
 
   /**
-   * Invalidate cache
+   * Invalidate cache (private internal use)
    * @private
    */
   _invalidateCache() {
     this._cache = null;
+    this._cachePromise = null;
+  }
+
+  /**
+   * Invalidate cache (public API for app startup)
+   * Forces next read to fetch fresh data from disk
+   * @public
+   */
+  invalidateCache() {
+    logger.debug('[StorageArea]', 'Cache invalidated - next read will fetch from disk');
+    this._invalidateCache();
   }
 
   /**
@@ -131,6 +228,8 @@ class StorageArea {
    * Set items in storage
    * @param {Object} items - Key-value pairs to store
    * @returns {Promise<void>}
+   *
+   * CRITICAL FIX: Cache updates ONLY AFTER confirmed write to prevent cache poisoning
    */
   async set(items) {
     if (!items || typeof items !== 'object' || Array.isArray(items)) {
@@ -141,24 +240,59 @@ class StorageArea {
     const oldValues = { ...oldData };
 
     if (isElectron) {
-      // Use Electron IPC
-      await window.electron.storage.set(items);
-      this._updateCache(items);
+      // CRITICAL: Wait for IPC confirmation BEFORE updating cache
+      try {
+        const startTime = Date.now();
+        const success = await window.electron.storage.set(items);
+        const duration = Date.now() - startTime;
 
-      // Changes are emitted via IPC from main process
-      // No need to manually emit here
+        if (!success) {
+          logger.error('[StorageArea] Write failed, cache NOT updated', new Error('Storage write returned false'));
+          throw new Error('Storage write returned false');
+        }
+
+        // ONLY update cache AFTER successful write confirmation
+        this._updateCache(items);
+        logger.storage('write', Object.keys(items).join(', '), `confirmed in ${duration}ms`);
+
+        // Changes are emitted via IPC from main process
+        // No need to manually emit here
+
+      } catch (error) {
+        logger.error('[StorageArea] Write failed, cache NOT updated', error);
+        // CRITICAL: Do NOT update cache on error
+        throw error; // Propagate error to caller
+      }
     } else {
       // Fallback to localStorage
-      Object.assign(oldData, items);
       try {
-        localStorage.setItem(`automa-${this.areaName}`, JSON.stringify(oldData));
-      } catch (error) {
-        console.error('[StorageArea] Failed to save to localStorage:', error);
-      }
-      this._updateCache(items);
+        Object.assign(oldData, items);
 
-      // Manually emit changes for localStorage
-      this._emitChanges(oldValues, oldData);
+        // Validate JSON serializability before writing
+        const serialized = JSON.stringify(oldData);
+
+        // Check localStorage quota
+        try {
+          localStorage.setItem(`automa-${this.areaName}`, serialized);
+        } catch (quotaError) {
+          if (quotaError.name === 'QuotaExceededError') {
+            logger.error('[StorageArea] localStorage quota exceeded', quotaError);
+            throw new Error('Storage quota exceeded. Please free up space.');
+          }
+          throw quotaError;
+        }
+
+        // Only update cache after successful write
+        this._updateCache(items);
+        logger.storage('write', Object.keys(items).join(', '), 'localStorage confirmed');
+
+        // Manually emit changes for localStorage
+        this._emitChanges(oldValues, oldData);
+
+      } catch (error) {
+        logger.error('[StorageArea] localStorage write failed, cache NOT updated', error);
+        throw error;
+      }
     }
 
     return Promise.resolve();
@@ -196,7 +330,7 @@ class StorageArea {
       try {
         localStorage.setItem(`automa-${this.areaName}`, JSON.stringify(oldData));
       } catch (error) {
-        console.error('[StorageArea] Failed to save to localStorage:', error);
+        logger.error('[StorageArea] Failed to save to localStorage', error);
       }
 
       this._invalidateCache();
@@ -258,7 +392,7 @@ class StorageArea {
         try {
           callback(changes, this.areaName);
         } catch (error) {
-          console.error('[StorageArea] Change listener error:', error);
+          logger.error('[StorageArea] Change listener error', error);
         }
       });
     }
@@ -277,6 +411,22 @@ class StorageArea {
           if (isElectron && this.changeListeners.size === 1) {
             // Setup listener from main process
             const removeListener = window.electron.storage.onChanged((changes) => {
+              // CRITICAL: Update cache BEFORE emitting changes for cache coherency
+              // This ensures components reading storage get fresh data immediately
+              if (this._cache) {
+                Object.entries(changes).forEach(([key, { newValue }]) => {
+                  if (newValue === undefined) {
+                    // Key was deleted
+                    delete this._cache[key];
+                  } else {
+                    // Key was added or updated
+                    this._cache[key] = newValue;
+                  }
+                });
+                logger.debug('[StorageArea]', 'Cache updated from main process changes', Object.keys(changes));
+              }
+
+              // Then emit changes to registered listeners
               this._emitChanges(
                 Object.fromEntries(
                   Object.entries(changes).map(([k, v]) => [k, v.oldValue])
@@ -316,12 +466,22 @@ class StorageArea {
 const browser = {
   storage: {
     local: new StorageArea('local'),
-    sync: new StorageArea('sync')
+    sync: new StorageArea('sync'),
+
+    /**
+     * Session storage API
+     * Used by: src/workflowEngine/blocksHandler-removed/handlerHandleDownload.js:13,27
+     *
+     * Browser extension session storage is temporary and cleared when the browser closes.
+     * In Electron, we map this to local storage since there's no concept of browser sessions.
+     * Data persists across app restarts but uses the same interface as browser.storage.local.
+     */
+    session: new StorageArea('session')
   },
 
   runtime: {
     sendMessage: (message) => {
-      console.log('[BrowserPolyfill] sendMessage:', message);
+      // Stub: No cross-extension messaging in Electron
       return Promise.resolve(null);
     },
 
@@ -367,6 +527,27 @@ const browser = {
     remove: () => Promise.resolve(),
     reload: () => Promise.resolve(),
     sendMessage: () => Promise.resolve(null),
+
+    /**
+     * Execute script in tab (Manifest V2 API)
+     * Used by: src/workflowEngine/injectContentScript.js:34
+     *
+     * In browser extensions, this injects content scripts into web pages.
+     * In Electron, content scripts don't work the same way (no isolated world context).
+     *
+     * Stub implementation returns empty array to prevent crashes when workflow
+     * engine tries to inject scripts. For Electron, use browser.scripting.executeScript instead.
+     *
+     * @param {number} tabId - Tab ID to inject into
+     * @param {Object} details - Script details (file, code, allFrames, etc.)
+     * @returns {Promise<Array>} Empty array (no execution result)
+     */
+    executeScript: (tabId, details) => {
+      // Stub implementation: Electron doesn't support browser-style content script injection
+      // Return empty array to indicate no script execution
+      return Promise.resolve([]);
+    },
+
     onRemoved: {
       addListener: () => {},
       removeListener: () => {},
@@ -401,7 +582,7 @@ const browser = {
 
   downloads: {
     download: (options) => {
-      console.log('[BrowserPolyfill] download:', options);
+      // Stub: Return fake download ID
       return Promise.resolve(Date.now());
     }
   },
@@ -415,7 +596,7 @@ const browser = {
 
   notifications: {
     create: (id, options) => {
-      console.log('[BrowserPolyfill] notification:', id, options);
+      // Stub: Return notification ID without showing system notification
       return Promise.resolve(id || `notif-${Date.now()}`);
     },
     clear: () => Promise.resolve(true),
@@ -502,14 +683,77 @@ const browser = {
       return [];
     },
     inIncognitoContext: false
+  },
+
+  // Web Navigation API - for workflow engine frame tracking
+  webNavigation: {
+    /**
+     * Get all frames in a tab
+     * Used by: src/workflowEngine/helper.js:71
+     *
+     * Electron doesn't have multi-frame tab architecture like browsers,
+     * so we return a fake single-frame structure to prevent crashes.
+     *
+     * The workflow engine expects: frames.reduce((acc, { frameId, url }) => ...)
+     * where url === 'about:blank' is handled specially (line 75 of helper.js)
+     *
+     * @param {Object} params - { tabId: number }
+     * @returns {Promise<Array<{frameId: number, parentFrameId: number, url: string}>>}
+     */
+    getAllFrames: ({ tabId }) => {
+      // Return single main frame structure that workflow engine expects
+      // This prevents crashes and allows workflows to run in Electron context
+      return Promise.resolve([
+        {
+          frameId: 0,           // Main frame always has ID 0
+          parentFrameId: -1,    // -1 indicates no parent (top-level frame)
+          url: 'about:blank',   // Default URL (actual URL not tracked in Electron)
+          errorOccurred: false
+        }
+      ]);
+    },
+
+    /**
+     * Event fired when navigation error occurs
+     * Used by: src/workflowEngine/helper.js:128,143
+     *
+     * Stub implementation - Electron doesn't provide navigation error events
+     * in the same way browsers do. Returns empty listener interface to prevent crashes.
+     */
+    onErrorOccurred: {
+      addListener: (callback) => {
+        // Stub: Electron doesn't track navigation errors like browsers
+        // Callback stored but never fired
+      },
+      removeListener: (callback) => {
+        // Stub: No-op for Electron
+      },
+      hasListener: (callback) => false
+    },
+
+    /**
+     * Event fired when navigation creates a new target (e.g., popup, new tab)
+     * Used by: src/workflowEngine/blocksHandler-removed/handlerBrowserEvent.js:95,99
+     *
+     * Stub implementation - Electron doesn't track navigation targets like browsers
+     */
+    onCreatedNavigationTarget: {
+      addListener: (callback) => {
+        // Stub: Electron doesn't track navigation targets
+      },
+      removeListener: (callback) => {
+        // Stub: No-op for Electron
+      },
+      hasListener: (callback) => false
+    }
   }
 };
 
 // Log initialization
 if (isElectron) {
-  console.log('[BrowserPolyfill] Initialized in Electron environment');
+  logger.info('[BrowserPolyfill] Initialized in Electron environment');
 } else {
-  console.log('[BrowserPolyfill] Initialized with localStorage fallback');
+  logger.info('[BrowserPolyfill] Initialized with localStorage fallback');
 }
 
 export default browser;

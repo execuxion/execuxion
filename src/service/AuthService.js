@@ -35,7 +35,8 @@ class AuthService {
         if (isValid) {
           this.user = authData.user;
           this.isAuthenticated = true;
-          console.log('✅ Auth restored from storage:', this.user?.clientId);
+          // Security: Don't log client identifiers in production
+          // console.log('✅ Auth restored from storage:', this.user?.clientId);
           return true;
         } else {
           // Invalid key - clear storage
@@ -101,7 +102,8 @@ class AuthService {
         }
       });
 
-      console.log('✅ Login successful:', this.user.clientId);
+      // Security: Don't log client identifiers in production
+      // console.log('✅ Login successful:', this.user.clientId);
       return {
         success: true,
         user: this.user

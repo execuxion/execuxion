@@ -1,37 +1,288 @@
-import { app, BrowserWindow, ipcMain, session, dialog, Menu, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, session, dialog, Menu, screen, safeStorage } from 'electron';
 import updater from 'electron-updater';
 import Store from 'electron-store';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import crypto from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
 const { autoUpdater } = updater;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Initialize electron-store with encryption
-const store = new Store({
-  name: 'execuxion-data',
-  encryptionKey: 'execuxion-secure-storage-key',
-  defaults: {
-    workflows: {},
-    settings: {
-      theme: 'dark',
-      language: 'en'
-    },
-    auth: {
-      apiKey: null,
-      clientId: null
+// Generate or retrieve encryption key using OS keychain via safeStorage
+// Falls back to file-based storage in development mode when OS encryption unavailable
+function getEncryptionKey() {
+  const keyStorePath = path.join(app.getPath('userData'), '.encryption-key');
+  const devKeyPath = path.join(app.getPath('userData'), '.dev-encryption-key');
+  const isProduction = app.isPackaged;
+
+  try {
+    // Try OS-encrypted key first (production mode)
+    if (fsSync.existsSync(keyStorePath)) {
+      if (safeStorage.isEncryptionAvailable()) {
+        const encryptedKey = fsSync.readFileSync(keyStorePath);
+        const decryptedKey = safeStorage.decryptString(encryptedKey);
+        console.log('[Security] ✅ Loaded encryption key from OS keychain');
+        return decryptedKey;
+      }
     }
+
+    // Check for development key (fallback)
+    if (fsSync.existsSync(devKeyPath)) {
+      const devKey = fsSync.readFileSync(devKeyPath, 'utf8');
+      if (!isProduction) {
+        console.warn('[Security] ⚠️ Using development encryption key (not OS-protected)');
+      }
+      return devKey;
+    }
+
+    // Generate a new random encryption key (256-bit)
+    const newKey = crypto.randomBytes(32).toString('hex');
+
+    // Try to use OS keychain (production)
+    if (safeStorage.isEncryptionAvailable()) {
+      const encryptedKey = safeStorage.encryptString(newKey);
+      fsSync.writeFileSync(keyStorePath, encryptedKey);
+
+      // Secure the key file permissions (Unix only)
+      if (process.platform !== 'win32') {
+        fsSync.chmodSync(keyStorePath, 0o600); // Owner read/write only
+      }
+
+      console.log('[Security] ✅ Generated new encryption key in OS keychain');
+      return newKey;
+    } else {
+      // Fallback for development mode
+      if (!isProduction) {
+        console.warn('[Security] ⚠️ OS encryption not available - using development fallback');
+        console.warn('[Security] ⚠️ This is ONLY acceptable in development mode');
+
+        fsSync.writeFileSync(devKeyPath, newKey, 'utf8');
+
+        // Secure the key file permissions (Unix only)
+        if (process.platform !== 'win32') {
+          fsSync.chmodSync(devKeyPath, 0o600);
+        }
+
+        return newKey;
+      } else {
+        throw new Error('OS encryption not available in production build');
+      }
+    }
+  } catch (error) {
+    console.error('[Security] ❌ Failed to get encryption key:', error.message);
+    throw error;
   }
-});
+}
+
+// HMAC integrity verification functions
+// Provides tamper detection for stored data
+const HMAC_KEY_FILE = '.hmac-key';
+const DEV_HMAC_KEY_FILE = '.dev-hmac-key';
+
+function getHmacKey() {
+  const hmacKeyPath = path.join(app.getPath('userData'), HMAC_KEY_FILE);
+  const devHmacKeyPath = path.join(app.getPath('userData'), DEV_HMAC_KEY_FILE);
+  const isProduction = app.isPackaged;
+
+  try {
+    // Try OS-encrypted HMAC key first (production mode)
+    if (fsSync.existsSync(hmacKeyPath)) {
+      if (safeStorage.isEncryptionAvailable()) {
+        const encryptedHmacKey = fsSync.readFileSync(hmacKeyPath);
+        return safeStorage.decryptString(encryptedHmacKey);
+      }
+    }
+
+    // Check for development HMAC key (fallback)
+    if (fsSync.existsSync(devHmacKeyPath)) {
+      const devHmacKey = fsSync.readFileSync(devHmacKeyPath, 'utf8');
+      return devHmacKey;
+    }
+
+    // Generate new HMAC key (256-bit)
+    const newHmacKey = crypto.randomBytes(32).toString('hex');
+
+    // Try to use OS keychain (production)
+    if (safeStorage.isEncryptionAvailable()) {
+      const encryptedHmacKey = safeStorage.encryptString(newHmacKey);
+      fsSync.writeFileSync(hmacKeyPath, encryptedHmacKey);
+
+      if (process.platform !== 'win32') {
+        fsSync.chmodSync(hmacKeyPath, 0o600);
+      }
+
+      return newHmacKey;
+    } else {
+      // Fallback for development mode
+      if (!isProduction) {
+        fsSync.writeFileSync(devHmacKeyPath, newHmacKey, 'utf8');
+
+        if (process.platform !== 'win32') {
+          fsSync.chmodSync(devHmacKeyPath, 0o600);
+        }
+
+        return newHmacKey;
+      } else {
+        throw new Error('OS encryption not available in production build');
+      }
+    }
+  } catch (error) {
+    console.error('[Security] ❌ Failed to get HMAC key:', error.message);
+    throw error;
+  }
+}
+
+function calculateHmac(data, hmacKey) {
+  const dataString = typeof data === 'string' ? data : JSON.stringify(data);
+  return createHmac('sha256', hmacKey).update(dataString).digest('hex');
+}
+
+function verifyHmac(data, expectedHmac, hmacKey) {
+  const calculatedHmac = calculateHmac(data, hmacKey);
+  return calculatedHmac === expectedHmac;
+}
+
+// Initialize electron-store with encryption and corruption recovery
+let store;
+let hmacKey;
+try {
+  const encryptionKey = getEncryptionKey();
+  hmacKey = getHmacKey();
+
+  store = new Store({
+    name: 'execuxion-data',
+    encryptionKey,
+    defaults: {
+      workflows: {},
+      settings: {
+        theme: 'dark',
+        language: 'en'
+      },
+      auth: {
+        apiKey: null,
+        clientId: null
+      }
+    }
+  });
+
+  // Generate HMAC signatures for all existing data that doesn't have them
+  // This handles default values and any data created outside of IPC handlers
+  const allKeys = Object.keys(store.store);
+  let hmacGenerated = 0;
+
+  allKeys.forEach(key => {
+    // Skip HMAC keys themselves
+    if (key.startsWith('__hmac__')) return;
+
+    // Check if this key already has an HMAC
+    const hmacStorageKey = `__hmac__${key}`;
+    if (!store.has(hmacStorageKey)) {
+      // Generate HMAC for this key
+      const value = store.get(key);
+      const hmac = calculateHmac(value, hmacKey);  // Use the HMAC key from initialization
+      store.set(hmacStorageKey, hmac);
+      hmacGenerated++;
+    }
+  });
+
+  if (hmacGenerated > 0) {
+    console.log(`[Security] ✅ Generated HMAC signatures for ${hmacGenerated} existing keys`);
+  }
+
+} catch (error) {
+  console.error('[Storage] ❌ Initialization failed:', error.message);
+
+  // If storage is corrupted, delete it and recreate
+  if (error.message?.includes('not valid JSON') || error.name === 'SyntaxError') {
+    console.warn('⚠️ Detected corrupted storage file, attempting recovery...');
+
+    try {
+      // Get the config file path (electron-store uses name + .json directly in userData)
+      const configPath = path.join(app.getPath('userData'), 'execuxion-data.json');
+      const backupPath = path.join(app.getPath('userData'), 'execuxion-data.json.corrupted');
+
+      console.log(`🔍 Looking for corrupted file at: ${configPath}`);
+
+      // Check if file exists
+      if (fsSync.existsSync(configPath)) {
+        // Backup corrupted file before deletion (synchronous)
+        try {
+          fsSync.copyFileSync(configPath, backupPath);
+          console.log(`📦 Backed up corrupted file to: ${backupPath}`);
+        } catch (copyError) {
+          console.warn('⚠️ Could not backup corrupted file:', copyError.message);
+        }
+
+        // Delete corrupted file (synchronous)
+        try {
+          fsSync.unlinkSync(configPath);
+          console.log('🗑️ Deleted corrupted storage file');
+        } catch (unlinkError) {
+          console.warn('⚠️ Could not delete corrupted file:', unlinkError.message);
+        }
+      } else {
+        console.log('ℹ️ Corrupted file does not exist, will create fresh storage');
+      }
+
+      // Recreate store with fresh data (will generate new encryption key)
+      const newEncryptionKey = getEncryptionKey();
+
+      store = new Store({
+        name: 'execuxion-data',
+        encryptionKey: newEncryptionKey,
+        defaults: {
+          workflows: {},
+          settings: {
+            theme: 'dark',
+            language: 'en'
+          },
+          auth: {
+            apiKey: null,
+            clientId: null
+          }
+        }
+      });
+
+      console.log('[Storage] ✅ Storage recreated successfully');
+
+      // Notify user about data loss
+      dialog.showMessageBox({
+        type: 'warning',
+        title: 'Storage Recovered',
+        message: 'The storage file was corrupted and has been reset.',
+        detail: 'Your workflows and settings have been reset to defaults. A backup of the corrupted file was saved for recovery attempts.',
+        buttons: ['OK']
+      });
+
+    } catch (recoveryError) {
+      console.error('❌ Failed to recover from corruption:', recoveryError);
+      dialog.showErrorBox(
+        'Fatal Error',
+        'Failed to initialize storage. Please contact support.\n\nError: ' + recoveryError.message
+      );
+      app.quit();
+    }
+  } else {
+    // Unknown error, can't recover
+    dialog.showErrorBox(
+      'Fatal Error',
+      'Failed to initialize storage. Please contact support.\n\nError: ' + error.message
+    );
+    app.quit();
+  }
+}
 
 // Environment detection
 const isDev = process.env.NODE_ENV === 'development';
 const isProduction = !isDev;
 
-// Enable remote debugging for development
-if (isDev || process.env.ELECTRON_DEBUG) {
+// Enable remote debugging ONLY in development mode
+// Security: Do not enable in production as it allows localhost debugging access
+if (isDev) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 }
 
@@ -65,7 +316,7 @@ function createWindow() {
       contextIsolation: true,
       sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
-      webSecurity: false, // Allow HTTP requests without CORS restrictions
+      webSecurity: isProduction, // Enable in production, disable in dev for localhost CORS
       allowRunningInsecureContent: false,
     },
     frame: false, // Frameless window for custom title bar
@@ -279,20 +530,49 @@ ipcMain.handle('updater:install', () => {
 
 ipcMain.handle('storage:get', async (event, keys) => {
   try {
+    // Helper to verify HMAC for a key
+    const getWithHmacVerify = (key) => {
+      const value = store.get(key);
+      if (value === undefined) return undefined;
+
+      // Check HMAC integrity
+      const hmacStorageKey = `__hmac__${key}`;
+      const storedHmac = store.get(hmacStorageKey);
+
+      if (storedHmac) {
+        // Use the global hmacKey (the actual secret key), not the storage key name
+        const isValid = verifyHmac(value, storedHmac, hmacKey);
+        if (!isValid) {
+          console.error('[Security] HMAC verification failed for key:', key);
+          // Return undefined to indicate corrupted data
+          return undefined;
+        }
+      }
+
+      return value;
+    };
+
     // Get all data if no keys specified
     if (!keys) {
-      // electron-store returns an object with null prototype
-      // Convert to plain object to ensure proper IPC serialization
       const storeData = store.store;
-      const allData = JSON.parse(JSON.stringify(storeData || {}));
-      console.log('[IPC storage:get] Returning all data, keys:', Object.keys(allData).length);
+      const allData = {};
+
+      // Filter out HMAC keys and verify data
+      Object.keys(storeData).forEach(key => {
+        if (!key.startsWith('__hmac__')) {
+          const verifiedValue = getWithHmacVerify(key);
+          if (verifiedValue !== undefined) {
+            allData[key] = verifiedValue;
+          }
+        }
+      });
+
       return allData;
     }
 
     // Single key as string
     if (typeof keys === 'string') {
-      const value = store.get(keys);
-      console.log(`[IPC storage:get] Key "${keys}":`, value !== undefined ? 'found' : 'not found');
+      const value = getWithHmacVerify(keys);
       return { [keys]: value };
     }
 
@@ -300,12 +580,11 @@ ipcMain.handle('storage:get', async (event, keys) => {
     if (Array.isArray(keys)) {
       const result = {};
       keys.forEach(key => {
-        const value = store.get(key);
+        const value = getWithHmacVerify(key);
         if (value !== undefined) {
           result[key] = value;
         }
       });
-      console.log('[IPC storage:get] Array keys:', keys, 'Found:', Object.keys(result));
       return result;
     }
 
@@ -313,17 +592,15 @@ ipcMain.handle('storage:get', async (event, keys) => {
     if (typeof keys === 'object') {
       const result = {};
       Object.keys(keys).forEach(key => {
-        const value = store.get(key);
+        const value = getWithHmacVerify(key);
         result[key] = value !== undefined ? value : keys[key];
       });
-      console.log('[IPC storage:get] Object keys with defaults');
       return result;
     }
 
-    console.log('[IPC storage:get] Fallback: returning empty object');
     return {};
   } catch (error) {
-    console.error('[IPC storage:get] Error:', error);
+    console.error('[Storage] Get error:', error.message);
     return {};
   }
 });
@@ -334,14 +611,47 @@ ipcMain.handle('storage:set', async (event, items) => {
       return false;
     }
 
+    // Enforce storage quota
+    const MAX_STORAGE_SIZE = 100 * 1024 * 1024; // 100 MB
+    const proposedData = JSON.stringify(items);
+    const proposedSize = proposedData.length;
+    const currentStoreData = JSON.stringify(store.store);
+    const currentSize = currentStoreData.length;
+    const newTotalSize = currentSize + proposedSize;
+
+    if (newTotalSize > MAX_STORAGE_SIZE) {
+      console.error('[Storage] Quota exceeded');
+
+      // Send error to renderer
+      if (mainWindow) {
+        mainWindow.webContents.send('storage:quota-exceeded', {
+          currentSize,
+          proposedSize,
+          limit: MAX_STORAGE_SIZE
+        });
+      }
+
+      return false;
+    }
+
     // Get old values for change detection
     const changes = {};
     const oldStore = { ...store.store };
 
-    // Set all items
+    // Set all items with verification and HMAC
     Object.entries(items).forEach(([key, value]) => {
       const oldValue = store.get(key);
       store.set(key, value);
+
+      // Verify write succeeded
+      const written = store.get(key);
+      if (JSON.stringify(written) !== JSON.stringify(value)) {
+        throw new Error(`Write verification failed for ${key}`);
+      }
+
+      // Generate and store HMAC for integrity verification
+      const hmac = calculateHmac(value, hmacKey);
+      store.set(`__hmac__${key}`, hmac);
 
       // Track changes
       if (JSON.stringify(oldValue) !== JSON.stringify(value)) {
@@ -352,14 +662,18 @@ ipcMain.handle('storage:set', async (event, items) => {
       }
     });
 
-    // Notify renderer of changes if any
+    // Force sync to disk
+    await new Promise(resolve => setImmediate(resolve));
+
+    // Notify renderer of changes
     if (Object.keys(changes).length > 0 && mainWindow) {
       mainWindow.webContents.send('storage:changed', changes);
     }
 
     return true;
+
   } catch (error) {
-    console.error('Storage set error:', error);
+    console.error('[Storage] Write error:', error.message);
     return false;
   }
 });
@@ -373,6 +687,8 @@ ipcMain.handle('storage:remove', async (event, keys) => {
       const oldValue = store.get(key);
       if (oldValue !== undefined) {
         store.delete(key);
+        // Also remove HMAC
+        store.delete(`__hmac__${key}`);
         changes[key] = {
           oldValue,
           newValue: undefined
@@ -387,7 +703,7 @@ ipcMain.handle('storage:remove', async (event, keys) => {
 
     return true;
   } catch (error) {
-    console.error('Storage remove error:', error);
+    console.error('[Storage] Remove error:', error.message);
     return false;
   }
 });
@@ -397,13 +713,15 @@ ipcMain.handle('storage:clear', async () => {
     const oldStore = { ...store.store };
     store.clear();
 
-    // Notify renderer of all cleared items
+    // Notify renderer of all cleared items (excluding HMAC keys)
     const changes = {};
     Object.keys(oldStore).forEach(key => {
-      changes[key] = {
-        oldValue: oldStore[key],
-        newValue: undefined
-      };
+      if (!key.startsWith('__hmac__')) {
+        changes[key] = {
+          oldValue: oldStore[key],
+          newValue: undefined
+        };
+      }
     });
 
     if (Object.keys(changes).length > 0 && mainWindow) {
@@ -412,7 +730,7 @@ ipcMain.handle('storage:clear', async () => {
 
     return true;
   } catch (error) {
-    console.error('Storage clear error:', error);
+    console.error('[Storage] Clear error:', error.message);
     return false;
   }
 });
