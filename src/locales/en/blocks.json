@@ -721,6 +721,25 @@
           "response": "Response"
         }
       },
+      "execuxion-user-details": {
+        "name": "User Details",
+        "description": "Get detailed Twitter user information via Execuxion API",
+        "username": {
+          "label": "Twitter Username",
+          "placeholder": "elonmusk or {{variable}}"
+        },
+        "timeout": {
+          "label": "Timeout (ms)",
+          "title": "Request timeout in milliseconds (0 to disable)"
+        },
+        "selectFields": "Select Fields to Extract",
+        "selectedCount": "({count} selected)",
+        "saveFullObject": "Save raw API response",
+        "fieldModal": {
+          "title": "Select Twitter User Fields",
+          "description": "Select which user fields to extract and choose where to save them"
+        }
+      },
       "while-loop": {
         "name": "While loop",
         "description": "Executes blocks while the condition is met",

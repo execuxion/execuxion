@@ -61,6 +61,71 @@
       <v-remixicon name="riFocus3Line" />
     </button> -->
     <div class="grow"></div>
+
+    <!-- Execuxion API User Avatar -->
+    <ui-popover
+      v-if="mainStore.auth.isAuthenticated && !userStore.user"
+      trigger="mouseenter click"
+      placement="right"
+      class="mt-4"
+    >
+      <template #trigger>
+        <span class="bg-box-transparent inline-block rounded-full p-1 cursor-pointer relative">
+          <div v-html="identiconSvg" class="w-8 h-8 rounded-full overflow-hidden"></div>
+          <!-- Connected indicator dot -->
+          <span class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></span>
+        </span>
+      </template>
+      <div class="w-56">
+        <div class="mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Execuxion API
+              </p>
+              <span class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                Connected
+              </span>
+            </div>
+            <button
+              @click.stop="refreshUserInfo"
+              :disabled="isRefreshing"
+              class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              :class="{ 'animate-spin': isRefreshing }"
+              title="Refresh account info"
+            >
+              <v-remixicon name="riRefreshLine" class="text-gray-500 dark:text-gray-400" size="16" />
+            </button>
+          </div>
+        </div>
+        <div class="space-y-2 text-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-gray-600 dark:text-gray-400">Mode:</span>
+            <span
+              :class="mainStore.auth.user?.mode === 'monthly' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'"
+              class="px-2 py-0.5 rounded text-xs font-medium capitalize"
+            >
+              {{ mainStore.auth.user?.mode || 'N/A' }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-gray-600 dark:text-gray-400">Credits:</span>
+            <span class="font-semibold text-gray-900 dark:text-gray-100">
+              {{ mainStore.auth.user?.credits?.toLocaleString() || '0' }}
+            </span>
+          </div>
+          <div v-if="mainStore.auth.user?.disabled" class="flex items-center justify-between">
+            <span class="text-gray-600 dark:text-gray-400">Status:</span>
+            <span class="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+              Disabled
+            </span>
+          </div>
+        </div>
+      </div>
+    </ui-popover>
+
+    <!-- Automa User Avatar (Original) -->
     <ui-popover
       v-if="userStore.user"
       trigger="mouseenter click"
@@ -139,6 +204,7 @@ import { initElementSelector } from '@/newtab/utils/elementSelector';
 import emitter from '@/lib/mitt';
 import AuthService from '@/service/AuthService';
 import { useStore } from '@/stores/main';
+import { minidenticon } from 'minidenticons';
 
 useGroupTooltip();
 
@@ -205,6 +271,51 @@ const tabs = [
 const hoverIndicator = ref(null);
 const showHoverIndicator = ref(false);
 const runningWorkflowsLen = computed(() => workflowStore.getAllStates.length);
+const isRefreshing = ref(false);
+
+// Execuxion API user computed properties
+const clientIdFromApiKey = computed(() => {
+  if (!mainStore.auth.apiKey) return '';
+  // Extract clientId from ex_<uuid>_<suffix> OR ex_<uuid> format (suffix is optional)
+  const match = mainStore.auth.apiKey.match(/^ex_([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:_|$)/i);
+  return match ? match[1] : '';
+});
+
+const identiconSvg = computed(() => {
+  const id = clientIdFromApiKey.value;
+  if (!id) return '';
+  // Generate identicon with default saturation and lightness for colorful output
+  // The function returns the SVG content (paths/rects) that go inside an SVG element
+  return minidenticon(id);
+});
+
+async function refreshUserInfo() {
+  if (isRefreshing.value) return;
+
+  try {
+    isRefreshing.value = true;
+
+    // Call the refresh method from AuthService
+    const success = await AuthService.refreshUserData();
+
+    if (success) {
+      // Update mainStore with fresh data
+      mainStore.setAuth({
+        isAuthenticated: true,
+        user: AuthService.user,
+        apiKey: AuthService.apiKey,
+      });
+      toast.success('Account info refreshed');
+    } else {
+      toast.error('Failed to refresh account info');
+    }
+  } catch (error) {
+    console.error('Refresh error:', error);
+    toast.error('Failed to refresh account info');
+  } finally {
+    isRefreshing.value = false;
+  }
+}
 
 useShortcut(
   tabs.reduce((acc, { shortcut }) => {

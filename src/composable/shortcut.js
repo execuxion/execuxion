@@ -6,55 +6,59 @@ import { isObject, parseJSON } from '@/utils/helper';
 const defaultShortcut = {
   'page:dashboard': {
     id: 'page:dashboard',
-    combo: 'option+1',
+    combo: 'mod+1',  // Standard: Ctrl/Cmd+1 for first tab
   },
   'page:workflows': {
     id: 'page:workflows',
-    combo: 'option+w',
+    combo: 'mod+2',  // Standard: Ctrl/Cmd+2 for second tab
   },
   'page:schedule': {
     id: 'page:schedule',
-    combo: 'option+t',
+    combo: 'mod+3',  // Standard: Ctrl/Cmd+3 for third tab
   },
   'page:logs': {
     id: 'page:logs',
-    combo: 'option+l',
+    combo: 'mod+4',  // Standard: Ctrl/Cmd+4 for fourth tab
   },
   'page:storage': {
     id: 'page:storage',
-    combo: 'option+a',
+    combo: 'mod+5',  // Standard: Ctrl/Cmd+5 for fifth tab
   },
   'page:settings': {
     id: 'page:settings',
-    combo: 'option+s',
+    combo: 'mod+,',  // Industry standard: Ctrl/Cmd+, for settings
   },
   'action:search': {
     id: 'action:search',
-    combo: 'mod+f',
+    combo: 'mod+f',  // ✓ Already standard
   },
   'action:new': {
     id: 'action:new',
-    combo: 'mod+option+n',
+    combo: 'mod+n',  // Standard: Ctrl/Cmd+N for new
   },
   'editor:duplicate-block': {
     id: 'editor:duplicate-block',
-    combo: 'mod+option+d',
+    combo: 'mod+d',  // Standard: Ctrl/Cmd+D for duplicate (VS Code, Figma)
   },
   'editor:search-blocks': {
     id: 'editor:search-blocks',
-    combo: 'mod+b',
+    combo: 'mod+shift+f',  // Standard: Ctrl/Cmd+Shift+F for project-wide search
   },
   'editor:save': {
     id: 'editor:save',
-    combo: 'mod+shift+s',
+    combo: 'mod+s',  // ✓ Already standard
   },
   'editor:execute-workflow': {
     id: 'editor:execute-workflow',
-    combo: 'option+enter',
+    combo: 'mod+enter',  // Standard: Ctrl/Cmd+Enter for run/execute (VS Code, IDEs)
   },
   'editor:toggle-sidebar': {
     id: 'editor:toggle-sidebar',
-    combo: 'mod+[',
+    combo: 'mod+b',  // Standard: Ctrl/Cmd+B for toggle sidebar (VS Code, browsers)
+  },
+  'editor:stop-workflow': {
+    id: 'editor:stop-workflow',
+    combo: 'mod+shift+x',  // Standard: Ctrl/Cmd+Shift+X for stop/terminate (VS Code)
   },
 };
 const customShortcut = parseJSON(localStorage.getItem('shortcuts', {})) || {};

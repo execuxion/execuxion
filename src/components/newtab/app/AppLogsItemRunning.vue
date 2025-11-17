@@ -79,7 +79,6 @@ import { useWorkflowStore } from '@/stores/workflow';
 import dbLogs from '@/db/logs';
 import dayjs from '@/lib/dayjs';
 import LogsHistory from '@/components/newtab/logs/LogsHistory.vue';
-import RendererWorkflowService from '@/service/renderer/RendererWorkflowService';
 
 const props = defineProps({
   logId: {
@@ -102,9 +101,14 @@ const running = computed(() =>
   workflowStore.getAllStates.find(({ id }) => id === props.logId)
 );
 
-function stopWorkflow() {
-  RendererWorkflowService.stopWorkflowExecution(running.value.id);
-  emit('close');
+async function stopWorkflow() {
+  try {
+    const { default: WorkflowManager } = await import('@/workflowEngine/WorkflowManager');
+    await WorkflowManager.instance.stopExecution(running.value.id);
+    emit('close');
+  } catch (error) {
+    console.error('Failed to stop workflow:', error);
+  }
 }
 
 watch(

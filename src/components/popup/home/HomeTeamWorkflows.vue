@@ -50,9 +50,14 @@ const teamWorkflowStore = useTeamWorkflowStore();
 const teamWorkflows = shallowRef([]);
 
 const workflows = computed(() =>
-  teamWorkflows.value.filter((workflow) =>
-    workflow.name.toLocaleLowerCase().includes(props.search.toLocaleLowerCase())
-  )
+  teamWorkflows.value.filter((workflow) => {
+    const query = props.search.toLocaleLowerCase();
+    const matchesName = workflow.name?.toLocaleLowerCase().includes(query);
+    const matchesDescription = workflow.description?.toLocaleLowerCase().includes(query);
+    const matchesCategory = workflow.category?.toLocaleLowerCase().includes(query);
+
+    return matchesName || matchesDescription || matchesCategory;
+  })
 );
 
 function openWorkflowPage({ teamId, id }) {

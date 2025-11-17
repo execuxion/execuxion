@@ -145,9 +145,12 @@ const pinnedBlocks = ref([]);
 
 const blocks = computed(() =>
   blocksArr.reduce((arr, block) => {
-    if (
-      block.name.toLocaleLowerCase().includes(query.value.toLocaleLowerCase())
-    ) {
+    const searchQuery = query.value.toLocaleLowerCase();
+    const matchesName = block.name.toLocaleLowerCase().includes(searchQuery);
+    const matchesDescription = block.description?.toLocaleLowerCase().includes(searchQuery);
+    const matchesKeywords = block.searchKeywords?.toLocaleLowerCase().includes(searchQuery);
+
+    if (matchesName || matchesDescription || matchesKeywords) {
       (arr[block.category] = arr[block.category] || []).push(block);
     }
 
@@ -165,9 +168,14 @@ const pinnedBlocksList = computed(() =>
         name: te(namePath) ? t(namePath) : copyBlocks[id].name,
       };
     })
-    .filter(({ name }) =>
-      name.toLocaleLowerCase().includes(query.value.toLocaleLowerCase())
-    )
+    .filter((block) => {
+      const searchQuery = query.value.toLocaleLowerCase();
+      const matchesName = block.name.toLocaleLowerCase().includes(searchQuery);
+      const matchesDescription = block.description?.toLocaleLowerCase().includes(searchQuery);
+      const matchesKeywords = block.searchKeywords?.toLocaleLowerCase().includes(searchQuery);
+
+      return matchesName || matchesDescription || matchesKeywords;
+    })
 );
 
 function updateWorkflowIcon(value) {

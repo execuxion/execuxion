@@ -141,6 +141,17 @@ router.beforeEach(async (to, from, next) => {
   // Initialize auth service if not already done
   if (!AuthService.isAuthenticated) {
     await AuthService.init();
+
+    // Sync auth state to mainStore
+    if (AuthService.isAuthenticated) {
+      const { useStore } = await import('@/stores/main');
+      const mainStore = useStore();
+      mainStore.setAuth({
+        isAuthenticated: true,
+        user: AuthService.user,
+        apiKey: AuthService.apiKey,
+      });
+    }
   }
 
   if (requiresAuth && !AuthService.isLoggedIn()) {

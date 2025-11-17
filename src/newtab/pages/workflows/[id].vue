@@ -1082,6 +1082,24 @@ function toggleSidebar() {
   state.showSidebar = !state.showSidebar;
   localStorage.setItem('workflow:sidebar', state.showSidebar);
 }
+async function stopRunningWorkflows() {
+  const runningStates = workflowStates.value;
+
+  if (runningStates.length === 0) {
+    return;
+  }
+
+  try {
+    const { default: WorkflowManager } = await import('@/workflowEngine/WorkflowManager');
+
+    // Stop all running instances of this workflow
+    for (const state of runningStates) {
+      await WorkflowManager.instance.stopExecution(state.id);
+    }
+  } catch (error) {
+    console.error('Failed to stop workflow:', error);
+  }
+}
 function initEditBlock(data) {
   const { editComponent, data: blockDefData, name } = blocks[data.id];
 
@@ -1609,6 +1627,7 @@ useHead({
 const shortcut = useShortcut([
   getShortcut('editor:toggle-sidebar', toggleSidebar),
   getShortcut('editor:duplicate-block', duplicateElements),
+  getShortcut('editor:stop-workflow', stopRunningWorkflows),
 ]);
 
 provide('workflow-editor', editor);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, dialog, Menu, screen, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, session, dialog, Menu, screen, safeStorage, shell } from 'electron';
 import updater from 'electron-updater';
 import Store from 'electron-store';
 import path from 'node:path';
@@ -286,8 +286,10 @@ if (isDev) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222');
 }
 
-// Disable hardware acceleration for better compatibility
-app.disableHardwareAcceleration();
+// Hardware acceleration enabled by default for smooth canvas/graphics performance
+// If users experience GPU driver issues, they can disable it via:
+// --disable-gpu command line flag or ELECTRON_DISABLE_GPU env variable
+// app.disableHardwareAcceleration();
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -383,7 +385,7 @@ function createWindow() {
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
-      require('electron').shell.openExternal(url);
+      shell.openExternal(url);
       return { action: 'deny' };
     }
     return { action: 'allow' };
@@ -909,4 +911,19 @@ ipcMain.handle('window:close', () => {
 
 ipcMain.handle('window:isMaximized', () => {
   return mainWindow ? mainWindow.isMaximized() : false;
+});
+
+// Shell IPC handlers for opening external links
+ipcMain.handle('shell:openExternal', async (event, url) => {
+  // Security: Only allow HTTPS URLs to prevent command injection
+  if (typeof url !== 'string') {
+    throw new Error('URL must be a string');
+  }
+
+  const urlObj = new URL(url);
+  if (!['http:', 'https:'].includes(urlObj.protocol)) {
+    throw new Error('Only HTTP and HTTPS URLs are allowed');
+  }
+
+  await shell.openExternal(url);
 });

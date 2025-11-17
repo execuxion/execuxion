@@ -74,6 +74,9 @@ const api = {
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   },
 
+  // External links
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+
   // Platform detection
   isElectron: true,
   platform: process.platform,

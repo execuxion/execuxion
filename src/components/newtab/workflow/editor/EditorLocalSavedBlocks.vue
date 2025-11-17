@@ -141,9 +141,13 @@ const sortedItems = computed(() =>
 const items = computed(() => {
   const query = state.query.toLocaleLowerCase();
 
-  return sortedItems.value.filter((item) =>
-    item.name.toLocaleLowerCase().includes(query)
-  );
+  return sortedItems.value.filter((item) => {
+    const matchesName = item.name?.toLocaleLowerCase().includes(query);
+    const matchesDescription = item.description?.toLocaleLowerCase().includes(query);
+    const matchesAuthor = item.author?.toLocaleLowerCase().includes(query);
+
+    return matchesName || matchesDescription || matchesAuthor;
+  });
 });
 
 function deleteItem({ id, name }) {

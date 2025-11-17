@@ -62,6 +62,7 @@
 import { reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useShortcut } from '@/composable/shortcut';
+import { getBlocks } from '@/utils/getSharedData';
 
 const props = defineProps({
   editor: {
@@ -97,9 +98,9 @@ const shortcut = useShortcut('editor:search-blocks', () => {
 
 function searchNodes({ item, text }) {
   const isMatch = (str) =>
-    str.toLocaleLowerCase().includes(text.toLocaleLowerCase());
+    str?.toLocaleLowerCase().includes(text.toLocaleLowerCase());
 
-  return isMatch(item.id) || isMatch(item.name) || isMatch(item.description);
+  return isMatch(item.id) || isMatch(item.name) || isMatch(item.description) || isMatch(item.searchKeywords);
 }
 function toggleActiveSearch() {
   state.active = !state.active;
@@ -117,13 +118,21 @@ function extractBlocks() {
   initialState.rectY = height / 2;
   initialState.position = props.editor.getTransform();
 
+  const blocks = getBlocks();
+
   state.autocompleteItems = props.editor.getNodes.value.map(
-    ({ computedPosition, id, data, label }) => ({
-      id,
-      position: computedPosition,
-      description: data.description || '',
-      name: t(`workflow.blocks.${label}.name`),
-    })
+    ({ computedPosition, id, data, label }) => {
+      // Get block definition to access searchKeywords
+      const blockDef = blocks[label] || {};
+
+      return {
+        id,
+        position: computedPosition,
+        description: data.description || '',
+        name: t(`workflow.blocks.${label}.name`),
+        searchKeywords: blockDef.searchKeywords || '',
+      };
+    }
   );
 }
 function clearHighlightedNodes() {

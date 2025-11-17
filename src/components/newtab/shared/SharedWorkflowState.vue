@@ -59,7 +59,6 @@
 import browser from 'webextension-polyfill';
 import { useI18n } from 'vue-i18n';
 import { getBlocks } from '@/utils/getSharedData';
-import RendererWorkflowService from '@/service/renderer/RendererWorkflowService';
 import dayjs from '@/lib/dayjs';
 
 const props = defineProps({
@@ -80,7 +79,12 @@ function formatDate(date, format) {
 function openTab() {
   browser.tabs.update(props.data.state.tabId, { active: true });
 }
-function stopWorkflow() {
-  RendererWorkflowService.stopWorkflowExecution(props.data.id);
+async function stopWorkflow() {
+  try {
+    const { default: WorkflowManager } = await import('@/workflowEngine/WorkflowManager');
+    await WorkflowManager.instance.stopExecution(props.data.id);
+  } catch (error) {
+    console.error('Failed to stop workflow:', error);
+  }
 }
 </script>

@@ -1,12 +1,12 @@
 <template>
   <template v-if="retrieved">
     <!-- Custom title bar for Electron -->
-    <app-title-bar v-if="isElectron && $route.name !== 'recording' && $route.name !== 'login'" />
+    <app-title-bar v-if="isElectron && $route.name !== 'recording'" />
     <app-sidebar v-if="$route.name !== 'recording' && $route.name !== 'login'" />
     <main :class="{
       'pl-16': $route.name !== 'recording' && $route.name !== 'login',
-      'pt-8 h-[calc(100vh-2rem)]': isElectron && $route.name !== 'recording' && $route.name !== 'login',
-      'h-screen': !isElectron || $route.name === 'recording' || $route.name === 'login'
+      'pt-8 h-[calc(100vh-2rem)]': isElectron && $route.name !== 'recording',
+      'h-screen': !isElectron || $route.name === 'recording'
     }">
       <router-view />
     </main>

@@ -1,88 +1,76 @@
 <template>
-  <div class="mx-auto max-w-xl py-16">
-    <!-- Header -->
-    <div class="mb-8 text-center">
-      <v-remixicon name="riKey2Line" size="48" class="mx-auto mb-4 text-accent" />
-      <h1 class="text-3xl font-semibold">
-        {{ t('auth.signIn') }}
-      </h1>
-      <p class="mt-2 text-gray-600 dark:text-gray-200">
-        {{ t('auth.signInDescription') }}
-      </p>
-    </div>
-
-    <!-- Error Alert -->
-    <ui-card v-if="error" padding="p-4" class="mb-8">
-      <div class="flex items-start">
-        <v-remixicon name="riAlertLine" class="mr-2 text-red-600 dark:text-red-400" />
-        <p class="text-sm text-red-600 dark:text-red-400">
-          {{ error }}
+  <div class="flex h-full w-full items-center justify-center">
+    <ui-card class="w-full max-w-md" padding="p-10">
+      <!-- Header -->
+      <div class="mb-8 text-center">
+        <v-remixicon name="riKey2Line" size="48" class="mx-auto mb-4 text-accent" />
+        <h1 class="text-2xl font-semibold">
+          API Configuration
+        </h1>
+        <p class="mt-2 text-base text-gray-600 dark:text-gray-200">
+          Enter your API key to get started
         </p>
       </div>
+
+      <!-- Error Alert -->
+      <div v-if="error" class="mb-4 rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
+        <div class="flex items-start">
+          <v-remixicon name="riAlertLine" class="mr-2 text-red-600 dark:text-red-400" size="18" />
+          <p class="text-sm text-red-600 dark:text-red-400">
+            {{ error }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Login Form -->
+      <form @submit.prevent="handleLogin" class="space-y-6">
+        <div>
+          <label class="mb-2 block text-base font-medium">API Key</label>
+          <ui-input
+            v-model="apiKey"
+            type="text"
+            placeholder="ex_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_xxxxxx"
+            prepend-icon="riKeyLine"
+            :disabled="loading"
+            class="w-full"
+            required
+            autofocus
+          />
+          <p class="ml-0.5 mt-2 text-sm text-gray-600 dark:text-gray-200">
+            {{ t('auth.noApiKey') }}
+            <a
+              href="https://api.execuxion.com/dashboard"
+              target="_blank"
+              rel="noopener"
+              class="text-accent underline hover:no-underline font-medium"
+            >
+              {{ t('auth.getDashboard') }}
+            </a>
+          </p>
+        </div>
+
+        <div class="space-y-3 pt-1">
+          <ui-button
+            type="submit"
+            :loading="loading"
+            :disabled="!apiKey || loading"
+            variant="accent"
+            class="w-full"
+          >
+            Continue
+          </ui-button>
+
+          <ui-button
+            @click="openDashboard"
+            type="button"
+            class="w-full flex items-center justify-center gap-2"
+          >
+            <v-remixicon name="riExternalLinkLine" size="18" />
+            <span>Open Web Dashboard</span>
+          </ui-button>
+        </div>
+      </form>
     </ui-card>
-
-    <!-- Login Form -->
-    <form @submit.prevent="handleLogin">
-      <div class="mb-8">
-        <p class="mb-1 font-semibold">API Key</p>
-        <ui-input
-          v-model="apiKey"
-          type="text"
-          placeholder="ex_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_xxxxxx"
-          prepend-icon="riKeyLine"
-          :disabled="loading"
-          class="w-full"
-          required
-          autofocus
-        />
-        <p class="ml-1 mt-1 text-sm text-gray-600 dark:text-gray-200">
-          {{ t('auth.noApiKey') }}
-          <a
-            href="https://api.execuxion.com/dashboard"
-            target="_blank"
-            rel="noopener"
-            class="text-accent hover:underline"
-          >
-            {{ t('auth.getDashboard') }}
-          </a>
-        </p>
-      </div>
-
-      <ui-button
-        type="submit"
-        :loading="loading"
-        :disabled="!apiKey || loading"
-        variant="accent"
-        class="w-full"
-      >
-        {{ t('auth.signIn') }}
-      </ui-button>
-    </form>
-
-    <!-- Additional Info -->
-    <div class="mt-8 space-y-3">
-      <ui-card padding="p-4" class="flex items-start">
-        <v-remixicon name="riShieldCheckLine" class="mr-2 flex-shrink-0 text-accent" size="20" />
-        <span class="text-sm text-gray-600 dark:text-gray-200">
-          {{ t('auth.secureStorage') }}
-        </span>
-      </ui-card>
-
-      <ui-card padding="p-4" class="flex items-start">
-        <v-remixicon name="riGoogleLine" class="mr-2 flex-shrink-0 text-accent" size="20" />
-        <span class="text-sm text-gray-600 dark:text-gray-200">
-          {{ t('auth.googleOAuthAvailable') }}
-          <a
-            href="https://api.execuxion.com/auth/google"
-            target="_blank"
-            rel="noopener"
-            class="text-accent hover:underline"
-          >
-            {{ t('auth.webDashboard') }}
-          </a>
-        </span>
-      </ui-card>
-    </div>
   </div>
 </template>
 
@@ -137,6 +125,19 @@ async function handleLogin() {
     console.error('Login error:', err);
   } finally {
     loading.value = false;
+  }
+}
+
+function openDashboard() {
+  const dashboardUrl = 'https://api.execuxion.com/dashboard';
+
+  // Check if we're in Electron
+  if (window.electron?.isElectron) {
+    // Use Electron's shell to open in default browser
+    window.electron.openExternal(dashboardUrl);
+  } else {
+    // Fallback for web version
+    window.open(dashboardUrl, '_blank', 'noopener,noreferrer');
   }
 }
 </script>

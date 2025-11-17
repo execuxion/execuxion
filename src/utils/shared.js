@@ -805,6 +805,33 @@ export const tasks = {
       dataColumn: '',
     },
   },
+  'execuxion-user-details': {
+    name: 'User Details',
+    description: 'Get detailed Twitter user information via Execuxion API',
+    searchKeywords: 'twitter x profile account bio followers following verified user details information',
+    icon: 'riTwitterLine',
+    component: 'BlockBasic',
+    editComponent: 'EditExecuxionUserDetails',
+    category: 'twitter',
+    inputs: 1,
+    outputs: 1,
+    allowedInputs: true,
+    maxConnection: 1,
+    refDataKeys: ['username'],
+    data: {
+      disableBlock: false,
+      description: '',
+      username: '',
+      timeout: 10000,
+      // Field mappings - like insert-data's dataList pattern
+      fieldMappings: [],
+      // Option to save entire user object
+      saveFullObject: false,
+      fullObjectVariable: 'userDetails',
+      fullObjectColumn: '',
+      fullObjectType: 'variable',
+    },
+  },
   'while-loop': {
     name: 'While loop',
     description: 'Execute blocks while the condition is met',

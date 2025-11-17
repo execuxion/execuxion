@@ -129,7 +129,6 @@ import { reactive } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { countDuration } from '@/utils/helper';
 import dayjs from '@/lib/dayjs';
-import RendererWorkflowService from '@/service/renderer/RendererWorkflowService';
 
 defineProps({
   logs: {
@@ -159,8 +158,13 @@ const state = reactive({
 function getTranslation(key, defText = '') {
   return te(key) ? t(key) : defText;
 }
-function stopWorkflow(stateId) {
-  RendererWorkflowService.stopWorkflowExecution(stateId);
+async function stopWorkflow(stateId) {
+  try {
+    const { default: WorkflowManager } = await import('@/workflowEngine/WorkflowManager');
+    await WorkflowManager.instance.stopExecution(stateId);
+  } catch (error) {
+    console.error('Failed to stop workflow:', error);
+  }
 }
 function toggleSelectedLog(selected, id) {
   if (selected) {
